@@ -1,0 +1,5 @@
+{
+  "name": "MarkDiff AI",
+  "description": "A smart Markdown editor that visualizes text differences and uses Gemini AI to suggest improvements.",
+  "requestFramePermissions": []
+}
