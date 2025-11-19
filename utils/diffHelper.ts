@@ -8,7 +8,6 @@ import * as Diff from 'diff';
  */
 export const computeMarkdownDiff = (oldText: string, newText: string): string => {
   // We use diffWords to respect word boundaries, which is better for prose.
-  // For code blocks, diffLines might be better, but diffWords is a good middle ground for markdown.
   const changes = Diff.diffWords(oldText, newText);
   
   let result = '';
@@ -16,13 +15,13 @@ export const computeMarkdownDiff = (oldText: string, newText: string): string =>
   changes.forEach((part) => {
     const value = part.value;
     if (part.added) {
-      // We wrap in <ins> which implies underlining, but we will style it yellow in CSS/Tailwind
-      // Using inline style or specific class that we handle in rehype/renderer
-      // We inject a span with a specific class that Tailwind recognizes if we were using raw HTML,
-      // but since we are passing to ReactMarkdown with rehype-raw, we can use standard tags with classes.
-      result += `<mark class="bg-yellow-200 text-yellow-900 rounded px-0.5">${value}</mark>`;
+      // Added: Green/Yellow background. 
+      // We add inline styles for clipboard compatibility (Word/Email)
+      // and Tailwind classes for the UI.
+      result += `<mark class="bg-yellow-200 text-yellow-900 rounded px-0.5" style="background-color: #fef08a; color: #713f12; padding: 0 2px; border-radius: 2px; text-decoration: none;">${value}</mark>`;
     } else if (part.removed) {
-      result += `<del class="bg-red-100 text-red-900 rounded px-0.5 decoration-red-500">${value}</del>`;
+      // Removed: Red background with strikethrough.
+      result += `<del class="bg-red-100 text-red-900 rounded px-0.5 decoration-red-500" style="background-color: #fee2e2; color: #7f1d1d; text-decoration: line-through; padding: 0 2px; border-radius: 2px;">${value}</del>`;
     } else {
       result += value;
     }

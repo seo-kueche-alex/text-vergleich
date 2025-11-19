@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Split, FileText, Wand2, ArrowRightLeft, Eye, AlertCircle, Copy, Check } from 'lucide-react';
 import { computeMarkdownDiff } from './utils/diffHelper';
 import { improveTextWithGemini } from './services/gemini';
@@ -22,6 +22,9 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'edit' | 'diff'>('edit');
   const [copySuccess, setCopySuccess] = useState(false);
+  
+  // Ref to access the rendered HTML for copying
+  const previewRef = useRef<HTMLDivElement>(null);
 
   // Generate the diff string suitable for Markdown rendering
   const diffContent = React.useMemo(() => {
@@ -48,18 +51,68 @@ const App: React.FC = () => {
   };
 
   const handleCopyDiff = async () => {
-    if (!diffContent) return;
-    
-    // Remove tailwind classes to create clean HTML/Markdown for clipboard
-    // This makes the output compatible with standard Markdown editors that support HTML tags
-    const cleanDiff = diffContent.replace(/ class="[^"]*"/g, '');
-    
+    if (!previewRef.current) return;
+
+    let succeeded = false;
+
+    // Method 1: Modern Async Clipboard API (Rich Text)
+    // This is the preferred modern way but can fail in some contexts
     try {
-      await navigator.clipboard.writeText(cleanDiff);
+      if (typeof ClipboardItem !== 'undefined') {
+        const htmlContent = previewRef.current.innerHTML;
+        const textContent = previewRef.current.innerText;
+        
+        const blobHtml = new Blob([htmlContent], { type: 'text/html' });
+        const blobText = new Blob([textContent], { type: 'text/plain' });
+        
+        const data = [new ClipboardItem({
+          'text/html': blobHtml,
+          'text/plain': blobText,
+        })];
+
+        await navigator.clipboard.write(data);
+        succeeded = true;
+      }
+    } catch (err) {
+      console.warn('Modern clipboard API failed, trying fallback...', err);
+    }
+
+    // Method 2: Legacy execCommand (Rich Text Fallback)
+    // This works by programmatically selecting the text and running the copy command
+    // It is very reliable for copying styles/colors
+    if (!succeeded) {
+      try {
+        const selection = window.getSelection();
+        if (selection) {
+          // Save current selection
+          const currentRange = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+          
+          // Select the diff container
+          selection.removeAllRanges();
+          const range = document.createRange();
+          range.selectNodeContents(previewRef.current);
+          selection.addRange(range);
+          
+          // Execute copy
+          succeeded = document.execCommand('copy');
+          
+          // Restore original selection
+          selection.removeAllRanges();
+          if (currentRange) {
+            selection.addRange(currentRange);
+          }
+        }
+      } catch (err) {
+        console.error('Legacy copy failed', err);
+      }
+    }
+
+    if (succeeded) {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy', err);
+    } else {
+      setError("Could not copy automatically. Please select the text and copy manually.");
+      setTimeout(() => setError(null), 4000);
     }
   };
 
@@ -198,14 +251,14 @@ const App: React.FC = () => {
                 <button
                   onClick={handleCopyDiff}
                   className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white px-2.5 py-1.5 rounded border border-slate-200 hover:border-slate-300 shadow-sm transition-all group"
-                  title="Copy Markdown with HTML diff tags"
+                  title="Copy formatted text (HTML)"
                 >
                   {copySuccess ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 group-hover:text-blue-600" />}
                   <span>{copySuccess ? 'Copied!' : 'Copy Diff'}</span>
                 </button>
               </div>
             </div>
-            <div className="flex-grow p-8 overflow-auto bg-white">
+            <div className="flex-grow p-8 overflow-auto bg-white" ref={previewRef}>
               <MarkdownPreview content={diffContent} />
             </div>
           </div>
@@ -214,7 +267,7 @@ const App: React.FC = () => {
       
       <footer className="bg-white border-t border-slate-200 py-6">
         <div className="max-w-7xl mx-auto px-4 text-center text-slate-400 text-sm">
-          <p>Powered by React, Diff.js, and Gemini 2.5 Flash</p>
+          <p>Powered by React, Diff.js, and Gemini 2.0 Flash</p>
         </div>
       </footer>
     </div>
