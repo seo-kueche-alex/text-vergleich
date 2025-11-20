@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { Split, FileText, Wand2, ArrowRightLeft, Eye, AlertCircle, Copy, Check } from 'lucide-react';
+import { Split, FileText, Wand2, ArrowRightLeft, Eye, AlertCircle, Copy, Check, Printer } from 'lucide-react';
 import { computeMarkdownDiff } from './utils/diffHelper';
 import { improveTextWithGemini } from './services/gemini';
 import { MarkdownPreview } from './components/MarkdownPreview';
@@ -50,68 +50,88 @@ const App: React.FC = () => {
     setModifiedText(originalText);
   };
 
+  const handlePrint = () => {
+    if (!previewRef.current) return;
+    
+    // Create a hidden iframe to print just the content
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>MarkDiff Print</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <style>
+              body { padding: 40px; font-family: sans-serif; }
+              /* Ensure background colors print */
+              * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            </style>
+          </head>
+          <body>
+            ${previewRef.current.innerHTML}
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      // Wait for styles to load then print
+      setTimeout(() => {
+        printWindow.print();
+        printWindow.close();
+      }, 500);
+    }
+  };
+
   const handleCopyDiff = async () => {
     if (!previewRef.current) return;
 
-    let succeeded = false;
-
-    // Method 1: Modern Async Clipboard API (Rich Text)
-    // This is the preferred modern way but can fail in some contexts
     try {
-      if (typeof ClipboardItem !== 'undefined') {
-        const htmlContent = previewRef.current.innerHTML;
-        const textContent = previewRef.current.innerText;
-        
-        const blobHtml = new Blob([htmlContent], { type: 'text/html' });
-        const blobText = new Blob([textContent], { type: 'text/plain' });
-        
-        const data = [new ClipboardItem({
-          'text/html': blobHtml,
-          'text/plain': blobText,
-        })];
+      // 1. Get the Rendered HTML (for Word/Email)
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <body style="font-family: sans-serif; color: #333;">
+            ${previewRef.current.innerHTML}
+          </body>
+        </html>
+      `;
+      
+      // 2. Get the HTML Source Code (for Markdown Editors)
+      // Instead of converting to Markdown (**bold**), we pass the raw HTML string (<span...>)
+      // This ensures that when you paste into a Markdown editor, it renders the colors correctly.
+      const htmlSourceCode = diffContent;
 
-        await navigator.clipboard.write(data);
-        succeeded = true;
+      const copyListener = (e: ClipboardEvent) => {
+        e.preventDefault();
+        if (e.clipboardData) {
+          // Rich Text (Word, Email)
+          e.clipboardData.setData('text/html', htmlContent);
+          // Plain Text (Code Editors, Markdown Editors) -> Now contains HTML tags!
+          e.clipboardData.setData('text/plain', htmlSourceCode);
+        }
+      };
+
+      document.addEventListener('copy', copyListener);
+      const successful = document.execCommand('copy');
+      document.removeEventListener('copy', copyListener);
+
+      if (successful) {
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } else {
+        // Fallback
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([htmlContent], { type: 'text/html' }),
+            'text/plain': new Blob([htmlSourceCode], { type: 'text/plain' }),
+          }),
+        ]);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
       }
     } catch (err) {
-      console.warn('Modern clipboard API failed, trying fallback...', err);
-    }
-
-    // Method 2: Legacy execCommand (Rich Text Fallback)
-    // This works by programmatically selecting the text and running the copy command
-    // It is very reliable for copying styles/colors
-    if (!succeeded) {
-      try {
-        const selection = window.getSelection();
-        if (selection) {
-          // Save current selection
-          const currentRange = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-          
-          // Select the diff container
-          selection.removeAllRanges();
-          const range = document.createRange();
-          range.selectNodeContents(previewRef.current);
-          selection.addRange(range);
-          
-          // Execute copy
-          succeeded = document.execCommand('copy');
-          
-          // Restore original selection
-          selection.removeAllRanges();
-          if (currentRange) {
-            selection.addRange(currentRange);
-          }
-        }
-      } catch (err) {
-        console.error('Legacy copy failed', err);
-      }
-    }
-
-    if (succeeded) {
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
-    } else {
-      setError("Could not copy automatically. Please select the text and copy manually.");
+      console.error('Copy failed', err);
+      setError("Could not copy automatically. Please try selecting the text manually.");
       setTimeout(() => setError(null), 4000);
     }
   };
@@ -249,12 +269,21 @@ const App: React.FC = () => {
                 <div className="h-4 w-px bg-slate-200 hidden sm:block"></div>
 
                 <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white px-2.5 py-1.5 rounded border border-slate-200 hover:border-slate-300 shadow-sm transition-all group"
+                  title="Print the diff view"
+                >
+                  <Printer className="w-3.5 h-3.5 group-hover:text-blue-600" />
+                  <span>Print</span>
+                </button>
+
+                <button
                   onClick={handleCopyDiff}
                   className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white px-2.5 py-1.5 rounded border border-slate-200 hover:border-slate-300 shadow-sm transition-all group"
-                  title="Copy formatted text (HTML)"
+                  title="Copy HTML (Preserves colors in Markdown editors)"
                 >
                   {copySuccess ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 group-hover:text-blue-600" />}
-                  <span>{copySuccess ? 'Copied!' : 'Copy Diff'}</span>
+                  <span>{copySuccess ? 'Copied!' : 'Copy HTML'}</span>
                 </button>
               </div>
             </div>
